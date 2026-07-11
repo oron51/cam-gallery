@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cam Gallery</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+    --fg:#e6edf3; --mut:#8b949e; --accent:#3b82f6; --accent2:#2563eb;
+    --vid:#8b5cf6; --img:#10b981; --danger:#ef4444; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--fg)}
+  a{color:var(--accent)}
+  header{position:sticky;top:0;z-index:20;background:rgba(14,17,22,.92);
+         backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .bar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;
+       padding:12px 16px;max-width:1400px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:17px;
+         margin-right:auto}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--img);
+              box-shadow:0 0 10px var(--img)}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+  input,select,button{font:inherit;color:var(--fg);background:var(--panel2);
+       border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  input[type=datetime-local]{color-scheme:dark}
+  button{cursor:pointer;background:var(--panel2);transition:.15s}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent2);border-color:var(--accent2);font-weight:600}
+  button.primary:hover{background:var(--accent)}
+  .presets{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px;
+           max-width:1400px;margin:0 auto}
+  .chip{padding:5px 12px;border-radius:999px;font-size:13px}
+  .chip.active{background:var(--accent2);border-color:var(--accent2)}
+  .status{padding:8px 16px;color:var(--mut);max-width:1400px;margin:0 auto;font-size:13px}
+  main{max-width:1400px;margin:0 auto;padding:8px 16px 60px}
+  .grid{display:grid;gap:16px;
+        grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+        overflow:hidden;display:flex;flex-direction:column}
+  .thumb{position:relative;aspect-ratio:16/9;background:#000;display:flex;
+         align-items:center;justify-content:center;cursor:pointer}
+  .thumb video,.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .badge{position:absolute;top:8px;left:8px;font-size:11px;font-weight:700;
+         padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em}
+  .badge.video{background:var(--vid)}.badge.image{background:var(--img)}
+  .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+        pointer-events:none}
+  .play svg{width:54px;height:54px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.6));opacity:.92}
+  .meta{padding:10px 12px;display:flex;align-items:center;gap:8px}
+  .meta .t{font-variant-numeric:tabular-nums;font-weight:600}
+  .meta .s{margin-left:auto;color:var(--mut);font-size:12px}
+  .meta a{margin-left:6px;color:var(--mut);text-decoration:none}
+  .meta a:hover{color:var(--accent)}
+  .empty{text-align:center;color:var(--mut);padding:60px 20px}
+  /* lightbox */
+  .lb{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.9);display:none;
+      align-items:center;justify-content:center;padding:20px}
+  .lb.open{display:flex}
+  .lb .box{max-width:96vw;max-height:92vh}
+  .lb video,.lb img{max-width:96vw;max-height:86vh;border-radius:8px;background:#000}
+  .lb .cap{color:var(--fg);text-align:center;margin-top:10px;font-weight:600}
+  .lb .x{position:absolute;top:14px;right:18px;font-size:30px;line-height:1;
+         background:none;border:none;color:#fff;cursor:pointer}
+  /* settings modal */
+  .modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.6);display:none;
+         align-items:center;justify-content:center;padding:20px}
+  .modal.open{display:flex}
+  .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+              padding:22px;width:min(460px,100%);display:flex;flex-direction:column;gap:14px}
+  .modal h2{margin:0;font-size:18px}
+  .modal p{margin:0;color:var(--mut);font-size:13px}
+  .modal .field input{width:100%}
+  .row{display:flex;gap:10px;justify-content:flex-end}
+  .icon-btn{padding:7px 10px}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><span class="dot"></span> Cam Gallery</div>
+    <div class="field"><label for="from">From</label><input type="datetime-local" id="from"></div>
+    <div class="field"><label for="to">To</label><input type="datetime-local" id="to"></div>
+    <div class="field"><label for="type">Type</label>
+      <select id="type"><option value="all">All</option><option value="video">Video</option><option value="image">Photo</option></select>
+    </div>
+    <button class="primary" id="load">Search</button>
+    <button class="icon-btn" id="settings" title="Settings">⚙</button>
+  </div>
+  <div class="presets" id="presets">
+    <button class="chip" data-h="1">Last hour</button>
+    <button class="chip" data-h="24">Last 24 h</button>
+    <button class="chip" data-today="1">Today</button>
+    <button class="chip" data-h="168">Last 7 days</button>
+    <button class="chip" data-all="1">All</button>
+  </div>
+  <div class="status" id="status"></div>
+</header>
+
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none"></div>
+</main>
+
+<div class="lb" id="lb"><button class="x" id="lbx">&times;</button>
+  <div class="box"><div id="lbmedia"></div><div class="cap" id="lbcap"></div></div>
+</div>
+
+<div class="modal" id="modal"><div class="box">
+  <h2>Connection settings</h2>
+  <p>Paste the two values printed by <code>deploy_viewer.sh</code>. They're saved
+     only in this browser (localStorage) — never in the repo.</p>
+  <div class="field"><label>API URL (Lambda Function URL)</label>
+    <input id="cfgUrl" placeholder="https://xxxx.lambda-url.ap-south-1.on.aws/"></div>
+  <div class="field"><label>Access token</label>
+    <input id="cfgTok" placeholder="e.g. 3f8a…"></div>
+  <div class="row"><button id="cfgSave" class="primary">Save</button></div>
+</div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const CFG = { get url(){return localStorage.getItem('cam_api')||''},
+              get tok(){return localStorage.getItem('cam_tok')||''} };
+const pad = n => String(n).padStart(2,'0');
+const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmtSize = b => b>=1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(0)+' KB';
+
+// ---- settings modal ----
+function openSettings(){ $('#cfgUrl').value=CFG.url; $('#cfgTok').value=CFG.tok; $('#modal').classList.add('open'); }
+$('#settings').onclick = openSettings;
+$('#cfgSave').onclick = () => {
+  localStorage.setItem('cam_api', $('#cfgUrl').value.trim());
+  localStorage.setItem('cam_tok', $('#cfgTok').value.trim());
+  $('#modal').classList.remove('open'); load();
+};
+$('#modal').onclick = e => { if(e.target.id==='modal') $('#modal').classList.remove('open'); };
+
+// ---- presets ----
+document.querySelectorAll('#presets .chip').forEach(c => c.onclick = () => {
+  document.querySelectorAll('#presets .chip').forEach(x=>x.classList.remove('active'));
+  c.classList.add('active');
+  const now = new Date();
+  if(c.dataset.all){ $('#from').value=''; $('#to').value=''; }
+  else if(c.dataset.today){ const s=new Date(now); s.setHours(0,0,0,0);
+    $('#from').value=toLocalInput(s); $('#to').value=toLocalInput(now); }
+  else { const s=new Date(now.getTime()-(+c.dataset.h)*3600e3);
+    $('#from').value=toLocalInput(s); $('#to').value=toLocalInput(now); }
+  load();
+});
+
+// ---- lightbox ----
+function openLightbox(it){
+  const m = $('#lbmedia');
+  m.innerHTML = it.type==='video'
+    ? `<video src="${it.url}" controls autoplay playsinline></video>`
+    : `<img src="${it.url}" alt="">`;
+  $('#lbcap').textContent = `${it.time}  ·  ${fmtSize(it.size)}`;
+  $('#lb').classList.add('open');
+}
+function closeLightbox(){ $('#lb').classList.remove('open'); $('#lbmedia').innerHTML=''; }
+$('#lbx').onclick = closeLightbox;
+$('#lb').onclick = e => { if(e.target.id==='lb') closeLightbox(); };
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeLightbox(); });
+
+// ---- render ----
+const PLAY = `<div class="play"><svg viewBox="0 0 24 24" fill="#fff"><circle cx="12" cy="12" r="11" fill="rgba(0,0,0,.45)"/><path d="M9.5 7.5v9l7-4.5z"/></svg></div>`;
+function render(items){
+  const grid = $('#grid'), empty = $('#empty');
+  grid.innerHTML='';
+  if(!items.length){ empty.style.display='block';
+    empty.textContent='No clips or photos in this range.'; return; }
+  empty.style.display='none';
+  for(const it of items){
+    const card = document.createElement('div'); card.className='card';
+    const media = it.type==='video'
+      ? `<video src="${it.url}#t=0.1" preload="metadata" muted></video>${PLAY}`
+      : `<img src="${it.url}" loading="lazy" alt="">`;
+    card.innerHTML = `
+      <div class="thumb"><span class="badge ${it.type}">${it.type==='video'?'▶ clip':'photo'}</span>${media}</div>
+      <div class="meta"><span class="t">${it.time}</span>
+        <span class="s">${fmtSize(it.size)}</span>
+        <a href="${it.url}" download title="Download">⬇</a></div>`;
+    card.querySelector('.thumb').onclick = () => openLightbox(it);
+    grid.appendChild(card);
+  }
+}
+
+// ---- load ----
+async function load(){
+  const st = $('#status');
+  if(!CFG.url){ st.textContent='⚙ Open Settings and paste your API URL + token to begin.';
+    openSettings(); return; }
+  const p = new URLSearchParams();
+  if(CFG.tok) p.set('token', CFG.tok);
+  const f = $('#from').value, t = $('#to').value, ty = $('#type').value;
+  if(f) p.set('from', Math.floor(new Date(f).getTime()/1000));
+  if(t) p.set('to',   Math.floor(new Date(t).getTime()/1000));
+  if(ty && ty!=='all') p.set('type', ty);
+  const url = CFG.url.replace(/\/?$/,'/') + '?' + p.toString();
+  st.textContent='Loading…';
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error(`HTTP ${r.status} — ${(await r.text()).slice(0,120)}`);
+    const data = await r.json();
+    render(data.clips||[]);
+    st.textContent = `${data.count} item${data.count===1?'':'s'}${f||t?' in range':''} · ${new Date().toLocaleTimeString()}`;
+  }catch(e){
+    st.textContent = '⚠ ' + e.message + ' — check the API URL/token in Settings.';
+    $('#grid').innerHTML=''; $('#empty').style.display='none';
+  }
+}
+$('#load').onclick = load;
+
+// default view: last 24 h
+document.querySelector('#presets .chip[data-h="24"]').click();
+</script>
+</body>
+</html>
