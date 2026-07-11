@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cam Control</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--line:#2a323d;--fg:#e6edf3;--mut:#8b949e;
+        --blue:#2563eb;--green:#10b981;--amber:#f59e0b;--purple:#8b5cf6;--red:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .brand{font-weight:700;font-size:18px;margin-right:auto}
+  a.link{color:var(--mut);text-decoration:none;font-size:14px}
+  a.link:hover{color:var(--blue)}
+  main{max-width:900px;margin:0 auto;padding:16px}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  button.act{border:0;border-radius:16px;padding:26px 16px;font:inherit;font-weight:700;font-size:18px;
+             color:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:8px;
+             transition:.12s;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+  button.act:active{transform:translateY(2px)}
+  button.act:disabled{opacity:.55;cursor:default}
+  .act .ico{font-size:34px}
+  .b-pic{background:var(--green)} .b-20{background:var(--amber)}
+  .b-10{background:var(--blue)} .b-live{background:var(--purple)}
+  #status{margin:16px 0;color:var(--mut);min-height:22px;font-size:14px}
+  .stage{margin-top:8px;background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+         min-height:220px;display:flex;align-items:center;justify-content:center}
+  .stage img,.stage video{width:100%;max-height:70vh;object-fit:contain;background:#000;display:block}
+  .stage .ph{color:var(--mut);padding:40px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .row a{color:var(--blue)}
+  .spin{width:18px;height:18px;border:3px solid #ffffff55;border-top-color:#fff;border-radius:50%;
+        display:inline-block;animation:s 0.8s linear infinite;vertical-align:middle}
+  @keyframes s{to{transform:rotate(360deg)}}
+  input{font:inherit;color:var(--fg);background:#1c232d;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .cfg{display:none;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .cfg.show{display:flex}
+  button.mini{background:#1c232d;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">🎛️ Cam Control</div>
+  <a class="link" href="index.html">🗂️ Gallery</a>
+  <button class="mini" id="gear">⚙</button>
+</header>
+<div class="cfg" id="cfg">
+  <input id="api" placeholder="API URL" style="flex:1;min-width:220px">
+  <input id="tok" placeholder="Token" style="min-width:160px">
+  <button class="mini" id="save">Save</button>
+</div>
+
+<main>
+  <div class="grid">
+    <button class="act b-pic"  id="pic"><span class="ico">📸</span>Take Picture</button>
+    <button class="act b-live" id="live"><span class="ico">📡</span>Live Video</button>
+    <button class="act b-10"   id="c10"><span class="ico">🎬</span>Record 10 s</button>
+    <button class="act b-20"   id="c20"><span class="ico">🎬</span>Record 20 s</button>
+  </div>
+  <div id="status">Ready.</div>
+  <div class="stage"><div class="ph" id="ph">Tap a button — result shows here.</div>
+    <div id="media" style="display:none;width:100%"></div>
+  </div>
+  <div class="row" id="links"></div>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const cfg={get api(){return (localStorage.getItem('cam_api')||'').replace(/\/?$/,'/')},
+           get tok(){return localStorage.getItem('cam_tok')||''}};
+const st=t=>$('#status').innerHTML=t;
+const buttons=['pic','live','c10','c20'];
+const setBusy=b=>buttons.forEach(id=>$('#'+id).disabled=b);
+
+// settings (shared with the gallery)
+$('#gear').onclick=()=>{ $('#api').value=cfg.api; $('#tok').value=cfg.tok; $('#cfg').classList.toggle('show'); };
+$('#save').onclick=()=>{ localStorage.setItem('cam_api',$('#api').value.trim());
+  localStorage.setItem('cam_tok',$('#tok').value.trim()); $('#cfg').classList.remove('show'); st('Saved.'); };
+
+function showMedia(html){ const m=$('#media'); m.innerHTML=html; m.style.display='block'; $('#ph').style.display='none'; }
+function need(){ if(!cfg.api){ st('⚙ Set your API URL + token first.'); $('#gear').click(); return false; } return true; }
+
+async function capture(kind){
+  if(!need()) return;
+  stopLive();
+  const url = kind==='photo'
+    ? `${cfg.api}snapshot?token=${encodeURIComponent(cfg.tok)}`
+    : `${cfg.api}record?secs=${kind}&token=${encodeURIComponent(cfg.tok)}`;
+  const label = kind==='photo' ? 'Capturing photo' : `Recording ${kind}s clip`;
+  setBusy(true); st(`<span class="spin"></span> ${label}…`);
+  try{
+    const r=await fetch(url);
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
+    if(d.type==='image') showMedia(`<img src="${d.geturl}" alt="">`);
+    else showMedia(`<video src="${d.geturl}" controls autoplay playsinline></video>`);
+    $('#links').innerHTML=`<a href="${d.geturl}" download>⬇ download</a> · <span style="color:var(--mut)">saved to gallery: ${d.key}</span>`;
+    st('✅ Saved to your S3 gallery.');
+  }catch(e){ st('⚠ '+e.message); }
+  finally{ setBusy(false); }
+}
+$('#pic').onclick=()=>capture('photo');
+$('#c10').onclick=()=>capture('10');
+$('#c20').onclick=()=>capture('20');
+
+// ---- live via WHEP through API Gateway ----
+let pc=null;
+function stopLive(){ if(pc){pc.close();pc=null;} }
+$('#live').onclick=async()=>{
+  if(!need()) return;
+  stopLive(); setBusy(true); st('<span class="spin"></span> Connecting live…');
+  try{
+    pc=new RTCPeerConnection();
+    pc.addTransceiver('video',{direction:'recvonly'});
+    pc.addTransceiver('audio',{direction:'recvonly'});
+    showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
+    pc.ontrack=e=>{ $('#lv').srcObject=e.streams[0]; };
+    pc.oniceconnectionstatechange=()=>{ if(pc) st('📡 live · '+pc.iceConnectionState); };
+    const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
+    await new Promise(res=>{ if(pc.iceGatheringState==='complete')return res();
+      const h=()=>{ if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',h);res();} };
+      pc.addEventListener('icegatheringstatechange',h); setTimeout(res,2000); });
+    const r=await fetch(`${cfg.api}whep`,{method:'POST',
+      headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp});
+    if(!r.ok) throw new Error('WHEP '+r.status);
+    await pc.setRemoteDescription({type:'answer',sdp:await r.text()});
+    st('📡 Live — tap the video to unmute.');
+    $('#links').innerHTML='<span style="color:var(--mut)">(browsers start muted — use the video’s volume control)</span>';
+  }catch(e){ st('⚠ live failed: '+e.message); }
+  finally{ setBusy(false); }
+};
+
+if(!cfg.api) st('⚙ Set your API URL + token (same as the gallery) to begin.');
+</script>
+</body>
+</html>
