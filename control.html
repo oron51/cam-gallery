@@ -104,30 +104,54 @@ $('#pic').onclick=()=>capture('photo');
 $('#c10').onclick=()=>capture('10');
 $('#c20').onclick=()=>capture('20');
 
-// ---- live via WHEP through API Gateway ----
-let pc=null;
-function stopLive(){ if(pc){pc.close();pc=null;} }
+// ---- live via WHEP through API Gateway (auto-reconnecting) ----
+let pc=null, liveWant=false, retryT=null;
+function stopLive(){ liveWant=false; clearTimeout(retryT); if(pc){pc.close();pc=null;} }
+
+// (re)build the WebRTC session; throws if the WHEP handshake fails.
+async function connectLive(){
+  if(pc){ pc.close(); pc=null; }
+  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  pc.addTransceiver('video',{direction:'recvonly'});
+  pc.addTransceiver('audio',{direction:'recvonly'});
+  if(!$('#lv')) showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
+  pc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
+  pc.oniceconnectionstatechange=()=>{
+    if(!pc) return;
+    const s=pc.iceConnectionState;
+    if(s==='connected'||s==='completed'){ clearTimeout(retryT); st('📡 Live — tap the video to unmute.'); }
+    else if((s==='disconnected'||s==='failed'||s==='closed') && liveWant){ st('📡 reconnecting…'); scheduleReconnect(); }
+    else st('📡 live · '+s);
+  };
+  const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
+  await new Promise(res=>{ if(pc.iceGatheringState==='complete')return res();
+    const h=()=>{ if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',h);res();} };
+    pc.addEventListener('icegatheringstatechange',h); setTimeout(res,2000); });
+  const r=await fetch(`${cfg.api}whep`,{method:'POST',
+    headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp});
+  if(!r.ok) throw new Error('WHEP '+r.status);
+  await pc.setRemoteDescription({type:'answer',sdp:await r.text()});
+}
+
+// retry every 2s while the user still wants live (survives a transient blip
+// that self-heals — the clearTimeout on 'connected' cancels a pending retry).
+function scheduleReconnect(){
+  if(!liveWant) return;
+  clearTimeout(retryT);
+  retryT=setTimeout(async()=>{
+    if(!liveWant) return;
+    try{ await connectLive(); }
+    catch(e){ st('📡 reconnecting…'); scheduleReconnect(); }
+  }, 2000);
+}
+
 $('#live').onclick=async()=>{
   if(!need()) return;
-  stopLive(); setBusy(true); st('<span class="spin"></span> Connecting live…');
+  stopLive(); liveWant=true; setBusy(true); st('<span class="spin"></span> Connecting live…');
   try{
-    pc=new RTCPeerConnection();
-    pc.addTransceiver('video',{direction:'recvonly'});
-    pc.addTransceiver('audio',{direction:'recvonly'});
-    showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
-    pc.ontrack=e=>{ $('#lv').srcObject=e.streams[0]; };
-    pc.oniceconnectionstatechange=()=>{ if(pc) st('📡 live · '+pc.iceConnectionState); };
-    const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
-    await new Promise(res=>{ if(pc.iceGatheringState==='complete')return res();
-      const h=()=>{ if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',h);res();} };
-      pc.addEventListener('icegatheringstatechange',h); setTimeout(res,2000); });
-    const r=await fetch(`${cfg.api}whep`,{method:'POST',
-      headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp});
-    if(!r.ok) throw new Error('WHEP '+r.status);
-    await pc.setRemoteDescription({type:'answer',sdp:await r.text()});
-    st('📡 Live — tap the video to unmute.');
-    $('#links').innerHTML='<span style="color:var(--mut)">(browsers start muted — use the video’s volume control)</span>';
-  }catch(e){ st('⚠ live failed: '+e.message); }
+    await connectLive();
+    $('#links').innerHTML='<span style="color:var(--mut)">(auto-reconnects if the stream drops · use the video’s volume to unmute)</span>';
+  }catch(e){ st('⚠ live failed: '+e.message+' — retrying…'); scheduleReconnect(); }
   finally{ setBusy(false); }
 };
 
