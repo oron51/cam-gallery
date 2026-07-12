@@ -91,7 +91,7 @@ function paintCam(){ document.querySelectorAll('#camsel button')
   .forEach(b=>b.classList.toggle('on',+b.dataset.c===camGet())); }
 document.querySelectorAll('#camsel button').forEach(b=>b.onclick=()=>{
   localStorage.setItem('cam_sel',b.dataset.c); paintCam();
-  stopLive(); st('📷 Camera '+b.dataset.c+' selected.'); });
+  stopLive(); stopP2P(); st('📷 Camera '+b.dataset.c+' selected.'); });
 paintCam();
 
 // settings (shared with the gallery)
@@ -166,15 +166,63 @@ function scheduleReconnect(){
   }, 2000);
 }
 
-$('#live').onclick=async()=>{
+// ============ P2P live (direct camera<->browser via esp_peer) ============
+// The ESP32 is the offerer; the browser answers. Signaling rides the VPS relay
+// through the API Gateway https proxy. Media flows peer-to-peer (STUN/TURN only
+// for hole-punching), so it does NOT cost server bandwidth.
+let ppc=null, pPoll=null, pWant=null, pHaveOffer=false;
+const P2P_ICE=[{urls:'stun:stun.l.google.com:19302'},
+               {urls:'turn:3.7.135.243:3478',username:'cam',credential:'camturnpass'}];
+function sigUrl(leaf){ return `${cfg.api}signal/${leaf}?cam=${camGet()}&token=${encodeURIComponent(cfg.tok)}`; }
+function sigPost(leaf,obj){ return fetch(sigUrl(leaf),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj||{})}).catch(()=>{}); }
+async function sigGet(leaf){ try{ const r=await fetch(sigUrl(leaf)); return r.ok?await r.json():null; }catch(e){ return null; } }
+function stopP2P(){
+  if(pPoll){clearInterval(pPoll);pPoll=null;}
+  if(pWant){clearInterval(pWant);pWant=null;}
+  if(ppc){ppc.close();ppc=null;}
+  pHaveOffer=false; sigPost('bye',{});
+}
+async function startP2P(){
   if(!need()) return;
-  stopLive(); liveWant=true; setBusy(true); st('<span class="spin"></span> Connecting live…');
-  try{
-    await connectLive();
-    $('#links').innerHTML='<span style="color:var(--mut)">(auto-reconnects if the stream drops · use the video’s volume to unmute)</span>';
-  }catch(e){ st('⚠ live failed: '+e.message+' — retrying…'); scheduleReconnect(); }
-  finally{ setBusy(false); }
-};
+  stopLive(); stopP2P(); setBusy(true);
+  st('<span class="spin"></span> P2P connecting…');
+  showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
+  ppc=new RTCPeerConnection({iceServers:P2P_ICE});
+  ppc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
+  ppc.onicecandidate=e=>{ if(e.candidate) sigPost('to_device',{type:'candidate',data:JSON.stringify(e.candidate)}); };
+  ppc.oniceconnectionstatechange=()=>{ if(!ppc) return;
+    const s=ppc.iceConnectionState;
+    if(s==='connected'||s==='completed') st('📡 P2P live — tap the video to unmute.');
+    else st('📡 P2P · '+s); };
+  await sigPost('want',{});                       // raise "I want cam N"
+  pWant=setInterval(()=>sigPost('want',{}),5000); // keepalive so the ESP32 keeps serving
+  pPoll=setInterval(async()=>{                     // pull the ESP32's offer + candidates
+    const d=await sigGet('to_browser'); if(!d||!d.msgs) return;
+    for(const m of d.msgs){
+      if(m.type==='sdp' && !pHaveOffer){
+        pHaveOffer=true;
+        try{
+          await ppc.setRemoteDescription({type:'offer',sdp:m.data});
+          const ans=await ppc.createAnswer(); await ppc.setLocalDescription(ans);
+          // wait briefly for ICE gathering so candidates ride in the answer SDP
+          await new Promise(res=>{ if(ppc.iceGatheringState==='complete')return res();
+            const h=()=>{ if(ppc.iceGatheringState==='complete'){ppc.removeEventListener('icegatheringstatechange',h);res();} };
+            ppc.addEventListener('icegatheringstatechange',h); setTimeout(res,1500); });
+          await sigPost('to_device',{type:'sdp',data:ppc.localDescription.sdp});
+        }catch(e){ st('⚠ P2P answer failed: '+e.message); }
+      } else if(m.type==='candidate'){
+        try{ let c=m.data; c=c[0]==='{'?JSON.parse(c):{candidate:c,sdpMLineIndex:0}; await ppc.addIceCandidate(c); }catch(e){}
+      }
+    }
+  },800);
+  $('#links').innerHTML='<span style="color:var(--mut)">(direct peer-to-peer · media doesn’t touch the server)</span>';
+  setBusy(false);
+}
+$('#live').onclick=startP2P;
+
+// keep the relay WHEP path available as a manual fallback (Stage 5 auto-wires it)
+window.startRelayLive=async()=>{ if(!need())return; stopP2P(); liveWant=true; setBusy(true);
+  try{ await connectLive(); }catch(e){ st('⚠ relay failed: '+e.message); scheduleReconnect(); } finally{ setBusy(false); } };
 
 if(!cfg.api) st('⚙ Set your API URL + token (same as the gallery) to begin.');
 </script>
