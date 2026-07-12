@@ -236,7 +236,7 @@ window.startRelayLive=async()=>{ if(!need())return; stopP2P(); liveWant=true; se
   try{ await connectLive();
     $('#links').innerHTML='<span style="color:var(--mut)">(auto-reconnects if the stream drops · use the video’s volume to unmute)</span>';
   }catch(e){ st('⚠ live failed: '+e.message+' — retrying…'); scheduleReconnect(); } finally{ setBusy(false); } };
-$('#live').onclick=startP2P;   // P2P bring-up (relay-only). window.startRelayLive = WHEP fallback.
+$('#live').onclick=window.startRelayLive;  // SHIPPING: MediaMTX relay (WHEP). startP2P = experimental.
 
 if(!cfg.api) st('⚙ Set your API URL + token (same as the gallery) to begin.');
 </script>
