@@ -183,8 +183,10 @@ function stopP2P(){
   pLastOffer=''; sigPost('bye',{});
 }
 function makePC(){
-  // RELAY-only: deterministic path through coturn (isolates the DTLS-over-TURN issue).
-  const pc=new RTCPeerConnection({iceServers:P2P_ICE, iceTransportPolicy:'relay'});
+  // Browser uses ALL candidates (esp. its srflx) so it connects DIRECTLY to the
+  // ESP32's relay candidate (one-sided TURN) — avoids the relay<->relay nesting
+  // that stalls DTLS. The ESP32 stays relay-only so it advertises a relay candidate.
+  const pc=new RTCPeerConnection({iceServers:P2P_ICE});
   pc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
   pc.onicecandidate=()=>{};   // NON-trickle: candidates ride in the answer SDP
   pc.oniceconnectionstatechange=()=>{ if(pc!==ppc) return;
