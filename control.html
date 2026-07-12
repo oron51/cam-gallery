@@ -183,8 +183,8 @@ function stopP2P(){
   pLastOffer=''; sigPost('bye',{});
 }
 function makePC(){
-  // relay-only for bring-up: both ends go via coturn (guaranteed path).
-  const pc=new RTCPeerConnection({iceServers:P2P_ICE, iceTransportPolicy:'relay'});
+  // ALL: prefer a direct host<->host path on the same LAN (relay DTLS stalls).
+  const pc=new RTCPeerConnection({iceServers:P2P_ICE});
   pc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
   pc.onicecandidate=()=>{};   // NON-trickle: candidates ride in the answer SDP
   pc.oniceconnectionstatechange=()=>{ if(pc!==ppc) return;
