@@ -170,7 +170,7 @@ function scheduleReconnect(){
 // The ESP32 is the offerer; the browser answers. Signaling rides the VPS relay
 // through the API Gateway https proxy. Media flows peer-to-peer (STUN/TURN only
 // for hole-punching), so it does NOT cost server bandwidth.
-let ppc=null, pPoll=null, pWant=null, pHaveOffer=false;
+let ppc=null, pPoll=null, pWant=null, pHaveOffer=false, pAnswerSent=false, pCandBuf=[];
 const P2P_ICE=[{urls:'stun:stun.l.google.com:19302'},
                {urls:'turn:3.7.135.243:3478',username:'cam',credential:'camturnpass'}];
 function sigUrl(leaf){ return `${cfg.api}signal/${leaf}?cam=${camGet()}&token=${encodeURIComponent(cfg.tok)}`; }
@@ -180,7 +180,7 @@ function stopP2P(){
   if(pPoll){clearInterval(pPoll);pPoll=null;}
   if(pWant){clearInterval(pWant);pWant=null;}
   if(ppc){ppc.close();ppc=null;}
-  pHaveOffer=false; sigPost('bye',{});
+  pHaveOffer=false; pAnswerSent=false; pCandBuf=[]; sigPost('bye',{});
 }
 async function startP2P(){
   if(!need()) return;
@@ -189,7 +189,11 @@ async function startP2P(){
   showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
   ppc=new RTCPeerConnection({iceServers:P2P_ICE});
   ppc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
-  ppc.onicecandidate=e=>{ if(e.candidate) sigPost('to_device',{type:'candidate',data:JSON.stringify(e.candidate)}); };
+  // trickle ICE: our candidates must reach the ESP32 AFTER our answer (esp_peer
+  // needs the remote description set first), so buffer until the answer is sent.
+  ppc.onicecandidate=e=>{ if(!e.candidate) return;
+    const msg={type:'candidate',data:JSON.stringify(e.candidate)};
+    if(pAnswerSent) sigPost('to_device',msg); else pCandBuf.push(msg); };
   ppc.oniceconnectionstatechange=()=>{ if(!ppc) return;
     const s=ppc.iceConnectionState;
     if(s==='connected'||s==='completed') st('📡 P2P live — tap the video to unmute.');
@@ -204,11 +208,10 @@ async function startP2P(){
         try{
           await ppc.setRemoteDescription({type:'offer',sdp:m.data});
           const ans=await ppc.createAnswer(); await ppc.setLocalDescription(ans);
-          // wait briefly for ICE gathering so candidates ride in the answer SDP
-          await new Promise(res=>{ if(ppc.iceGatheringState==='complete')return res();
-            const h=()=>{ if(ppc.iceGatheringState==='complete'){ppc.removeEventListener('icegatheringstatechange',h);res();} };
-            ppc.addEventListener('icegatheringstatechange',h); setTimeout(res,1500); });
-          await sigPost('to_device',{type:'sdp',data:ppc.localDescription.sdp});
+          await sigPost('to_device',{type:'sdp',data:ans.sdp}); // answer FIRST
+          pAnswerSent=true;
+          for(const c of pCandBuf) sigPost('to_device',c);      // then our candidates
+          pCandBuf=[];
         }catch(e){ st('⚠ P2P answer failed: '+e.message); }
       } else if(m.type==='candidate'){
         try{ let c=m.data; c=c[0]==='{'?JSON.parse(c):{candidate:c,sdpMLineIndex:0}; await ppc.addIceCandidate(c); }catch(e){}
