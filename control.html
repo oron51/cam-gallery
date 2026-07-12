@@ -170,7 +170,7 @@ function scheduleReconnect(){
 // The ESP32 is the offerer; the browser answers. Signaling rides the VPS relay
 // through the API Gateway https proxy. Media flows peer-to-peer (STUN/TURN only
 // for hole-punching), so it does NOT cost server bandwidth.
-let ppc=null, pPoll=null, pWant=null, pHaveOffer=false, pAnswerSent=false, pCandBuf=[];
+let ppc=null, pPoll=null, pWant=null, pLastOffer='';
 const P2P_ICE=[{urls:'stun:stun.l.google.com:19302'},
                {urls:'turn:3.7.135.243:3478',username:'cam',credential:'camturnpass'}];
 function sigUrl(leaf){ return `${cfg.api}signal/${leaf}?cam=${camGet()}&token=${encodeURIComponent(cfg.tok)}`; }
@@ -179,45 +179,48 @@ async function sigGet(leaf){ try{ const r=await fetch(sigUrl(leaf)); return r.ok
 function stopP2P(){
   if(pPoll){clearInterval(pPoll);pPoll=null;}
   if(pWant){clearInterval(pWant);pWant=null;}
-  if(ppc){ppc.close();ppc=null;}
-  pHaveOffer=false; pAnswerSent=false; pCandBuf=[]; sigPost('bye',{});
+  if(ppc){try{ppc.close();}catch(e){}ppc=null;}
+  pLastOffer=''; sigPost('bye',{});
+}
+function makePC(){
+  // relay-only for bring-up: both ends go via coturn (guaranteed path).
+  const pc=new RTCPeerConnection({iceServers:P2P_ICE, iceTransportPolicy:'relay'});
+  pc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
+  pc.onicecandidate=()=>{};   // NON-trickle: candidates ride in the answer SDP
+  pc.oniceconnectionstatechange=()=>{ if(pc!==ppc) return;
+    const s=pc.iceConnectionState;
+    if(s==='connected'||s==='completed') st('📡 P2P live — tap the video to unmute.');
+    else st('📡 P2P · '+s); };
+  return pc;
+}
+// (re)build the peer and answer a given offer — robust against the ESP32's
+// auto-reconnect (each new offer just rebuilds), so we can't get stuck.
+async function negotiate(offerSdp){
+  if(ppc){ try{ppc.close();}catch(e){} }
+  ppc=makePC();
+  await ppc.setRemoteDescription({type:'offer',sdp:offerSdp});
+  const ans=await ppc.createAnswer(); await ppc.setLocalDescription(ans);
+  await new Promise(res=>{ if(ppc.iceGatheringState==='complete')return res();
+    const h=()=>{ if(ppc.iceGatheringState==='complete'){ppc.removeEventListener('icegatheringstatechange',h);res();} };
+    ppc.addEventListener('icegatheringstatechange',h); setTimeout(res,4000); });
+  await sigPost('to_device',{type:'sdp',data:ppc.localDescription.sdp});
+  st('📡 P2P · answered, connecting…');
 }
 async function startP2P(){
   if(!need()) return;
   stopLive(); stopP2P(); setBusy(true);
   st('<span class="spin"></span> P2P connecting…');
   showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
-  // relay-only for bring-up: both ends go via coturn (guaranteed path) so the
-  // ESP32's relay candidate is exchanged; relax later for true direct P2P.
-  ppc=new RTCPeerConnection({iceServers:P2P_ICE, iceTransportPolicy:'relay'});
-  ppc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
-  // NON-trickle: esp_peer embeds all its candidates in one SDP and expects the
-  // same back, so we DON'T send separate candidate messages — we wait for ICE
-  // gathering (incl. the TURN relay) to finish and put them all in the answer.
-  ppc.onicecandidate=()=>{};
-  ppc.oniceconnectionstatechange=()=>{ if(!ppc) return;
-    const s=ppc.iceConnectionState;
-    if(s==='connected'||s==='completed') st('📡 P2P live — tap the video to unmute.');
-    else st('📡 P2P · '+s); };
   await sigPost('want',{});                       // raise "I want cam N"
   pWant=setInterval(()=>sigPost('want',{}),5000); // keepalive so the ESP32 keeps serving
-  pPoll=setInterval(async()=>{                     // pull the ESP32's offer
+  pPoll=setInterval(async()=>{
     const d=await sigGet('to_browser'); if(!d||!d.msgs) return;
     for(const m of d.msgs){
-      if(m.type==='sdp' && !pHaveOffer){
-        pHaveOffer=true;
-        try{
-          await ppc.setRemoteDescription({type:'offer',sdp:m.data});
-          const ans=await ppc.createAnswer(); await ppc.setLocalDescription(ans);
-          // wait for full ICE gathering (host+srflx+relay) so candidates ride in the SDP
-          await new Promise(res=>{ if(ppc.iceGatheringState==='complete')return res();
-            const h=()=>{ if(ppc.iceGatheringState==='complete'){ppc.removeEventListener('icegatheringstatechange',h);res();} };
-            ppc.addEventListener('icegatheringstatechange',h); setTimeout(res,4000); });
-          await sigPost('to_device',{type:'sdp',data:ppc.localDescription.sdp});
-        }catch(e){ st('⚠ P2P answer failed: '+e.message); }
-      } else if(m.type==='candidate'){
-        try{ let c=m.data; c=c[0]==='{'?JSON.parse(c):{candidate:c,sdpMLineIndex:0}; await ppc.addIceCandidate(c); }catch(e){}
-      }
+      if(m.type!=='sdp' || m.data===pLastOffer) continue;
+      const live=ppc && (ppc.iceConnectionState==='connected'||ppc.iceConnectionState==='completed');
+      if(live) continue;                          // already connected: ignore extra offers
+      pLastOffer=m.data;
+      try{ await negotiate(m.data); }catch(e){ st('⚠ P2P answer failed: '+e.message); }
     }
   },800);
   $('#links').innerHTML='<span style="color:var(--mut)">(direct peer-to-peer · media doesn’t touch the server)</span>';
