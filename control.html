@@ -189,18 +189,17 @@ async function startP2P(){
   showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
   ppc=new RTCPeerConnection({iceServers:P2P_ICE});
   ppc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
-  // trickle ICE: our candidates must reach the ESP32 AFTER our answer (esp_peer
-  // needs the remote description set first), so buffer until the answer is sent.
-  ppc.onicecandidate=e=>{ if(!e.candidate) return;
-    const msg={type:'candidate',data:JSON.stringify(e.candidate)};
-    if(pAnswerSent) sigPost('to_device',msg); else pCandBuf.push(msg); };
+  // NON-trickle: esp_peer embeds all its candidates in one SDP and expects the
+  // same back, so we DON'T send separate candidate messages — we wait for ICE
+  // gathering (incl. the TURN relay) to finish and put them all in the answer.
+  ppc.onicecandidate=()=>{};
   ppc.oniceconnectionstatechange=()=>{ if(!ppc) return;
     const s=ppc.iceConnectionState;
     if(s==='connected'||s==='completed') st('📡 P2P live — tap the video to unmute.');
     else st('📡 P2P · '+s); };
   await sigPost('want',{});                       // raise "I want cam N"
   pWant=setInterval(()=>sigPost('want',{}),5000); // keepalive so the ESP32 keeps serving
-  pPoll=setInterval(async()=>{                     // pull the ESP32's offer + candidates
+  pPoll=setInterval(async()=>{                     // pull the ESP32's offer
     const d=await sigGet('to_browser'); if(!d||!d.msgs) return;
     for(const m of d.msgs){
       if(m.type==='sdp' && !pHaveOffer){
@@ -208,10 +207,11 @@ async function startP2P(){
         try{
           await ppc.setRemoteDescription({type:'offer',sdp:m.data});
           const ans=await ppc.createAnswer(); await ppc.setLocalDescription(ans);
-          await sigPost('to_device',{type:'sdp',data:ans.sdp}); // answer FIRST
-          pAnswerSent=true;
-          for(const c of pCandBuf) sigPost('to_device',c);      // then our candidates
-          pCandBuf=[];
+          // wait for full ICE gathering (host+srflx+relay) so candidates ride in the SDP
+          await new Promise(res=>{ if(ppc.iceGatheringState==='complete')return res();
+            const h=()=>{ if(ppc.iceGatheringState==='complete'){ppc.removeEventListener('icegatheringstatechange',h);res();} };
+            ppc.addEventListener('icegatheringstatechange',h); setTimeout(res,4000); });
+          await sigPost('to_device',{type:'sdp',data:ppc.localDescription.sdp});
         }catch(e){ st('⚠ P2P answer failed: '+e.message); }
       } else if(m.type==='candidate'){
         try{ let c=m.data; c=c[0]==='{'?JSON.parse(c):{candidate:c,sdpMLineIndex:0}; await ppc.addIceCandidate(c); }catch(e){}
