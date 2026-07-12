@@ -183,8 +183,8 @@ function stopP2P(){
   pLastOffer=''; sigPost('bye',{});
 }
 function makePC(){
-  // ALL: prefer a direct host<->host path on the same LAN (relay DTLS stalls).
-  const pc=new RTCPeerConnection({iceServers:P2P_ICE});
+  // RELAY-only: deterministic path through coturn (isolates the DTLS-over-TURN issue).
+  const pc=new RTCPeerConnection({iceServers:P2P_ICE, iceTransportPolicy:'relay'});
   pc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
   pc.onicecandidate=()=>{};   // NON-trickle: candidates ride in the answer SDP
   pc.oniceconnectionstatechange=()=>{ if(pc!==ppc) return;
@@ -234,7 +234,7 @@ window.startRelayLive=async()=>{ if(!need())return; stopP2P(); liveWant=true; se
   try{ await connectLive();
     $('#links').innerHTML='<span style="color:var(--mut)">(auto-reconnects if the stream drops · use the video’s volume to unmute)</span>';
   }catch(e){ st('⚠ live failed: '+e.message+' — retrying…'); scheduleReconnect(); } finally{ setBusy(false); } };
-$('#live').onclick=window.startRelayLive;
+$('#live').onclick=startP2P;   // P2P bring-up (relay-only). window.startRelayLive = WHEP fallback.
 
 if(!cfg.api) st('⚙ Set your API URL + token (same as the gallery) to begin.');
 </script>
