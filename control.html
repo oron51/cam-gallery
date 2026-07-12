@@ -200,6 +200,10 @@ function makePC(){
 async function negotiate(offerSdp){
   if(ppc){ try{ppc.close();}catch(e){} }
   ppc=makePC();
+  // Force the ESP32 to be the DTLS CLIENT (esp_peer's well-supported role):
+  // tell Chrome the offerer is 'active', so Chrome answers 'passive' (server)
+  // and the ESP32 initiates the handshake. Fixes the server-side CONN_EOF.
+  offerSdp=offerSdp.replace(/a=setup:actpass/g,'a=setup:active');
   await ppc.setRemoteDescription({type:'offer',sdp:offerSdp});
   const ans=await ppc.createAnswer(); await ppc.setLocalDescription(ans);
   await new Promise(res=>{ if(ppc.iceGatheringState==='complete')return res();
