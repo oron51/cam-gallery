@@ -187,7 +187,9 @@ async function startP2P(){
   stopLive(); stopP2P(); setBusy(true);
   st('<span class="spin"></span> P2P connecting…');
   showMedia(`<video id="lv" autoplay playsinline controls muted></video>`);
-  ppc=new RTCPeerConnection({iceServers:P2P_ICE});
+  // relay-only for bring-up: both ends go via coturn (guaranteed path) so the
+  // ESP32's relay candidate is exchanged; relax later for true direct P2P.
+  ppc=new RTCPeerConnection({iceServers:P2P_ICE, iceTransportPolicy:'relay'});
   ppc.ontrack=e=>{ const v=$('#lv'); if(v) v.srcObject=e.streams[0]; };
   // NON-trickle: esp_peer embeds all its candidates in one SDP and expects the
   // same back, so we DON'T send separate candidate messages — we wait for ICE
