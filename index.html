@@ -35,6 +35,9 @@
            max-width:1400px;margin:0 auto}
   .chip{padding:5px 12px;border-radius:999px;font-size:13px}
   .chip.active{background:var(--accent2);border-color:var(--accent2)}
+  .camsel{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .camsel button{border:0;border-radius:0;padding:7px 11px;min-width:34px;background:var(--panel2)}
+  .camsel button.on{background:var(--accent2);font-weight:700}
   .status{padding:8px 16px;color:var(--mut);max-width:1400px;margin:0 auto;font-size:13px}
   main{max-width:1400px;margin:0 auto;padding:8px 16px 60px}
   .grid{display:grid;gap:16px;
@@ -82,6 +85,12 @@
 <header>
   <div class="bar">
     <div class="brand"><span class="dot"></span> Cam Gallery</div>
+    <div class="field"><label>Camera</label>
+      <div class="camsel" id="camsel">
+        <button data-c="1">1</button><button data-c="2">2</button>
+        <button data-c="3">3</button><button data-c="4">4</button>
+      </div>
+    </div>
     <div class="field"><label for="from">From</label><input type="datetime-local" id="from"></div>
     <div class="field"><label for="to">To</label><input type="datetime-local" id="to"></div>
     <div class="field"><label for="type">Type</label>
@@ -125,6 +134,13 @@ const $ = s => document.querySelector(s);
 const CFG = { get url(){return localStorage.getItem('cam_api')||''},
               get tok(){return localStorage.getItem('cam_tok')||''} };
 const pad = n => String(n).padStart(2,'0');
+// ---- camera switch (shared with control panel via localStorage) ----
+const camGet = () => +(localStorage.getItem('cam_sel')||'1');
+function paintCam(){ document.querySelectorAll('#camsel button')
+  .forEach(b => b.classList.toggle('on', +b.dataset.c===camGet())); }
+document.querySelectorAll('#camsel button').forEach(b => b.onclick = () => {
+  localStorage.setItem('cam_sel', b.dataset.c); paintCam(); load(); });
+paintCam();
 const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const fmtSize = b => b>=1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(0)+' KB';
 
@@ -195,6 +211,7 @@ async function load(){
     openSettings(); return; }
   const p = new URLSearchParams();
   if(CFG.tok) p.set('token', CFG.tok);
+  p.set('prefix', 'cam'+camGet()+'/');            // per-camera S3 folder
   const f = $('#from').value, t = $('#to').value, ty = $('#type').value;
   if(f) p.set('from', Math.floor(new Date(f).getTime()/1000));
   if(t) p.set('to',   Math.floor(new Date(t).getTime()/1000));
