@@ -226,11 +226,15 @@ async function startP2P(){
   $('#links').innerHTML='<span style="color:var(--mut)">(direct peer-to-peer · media doesn’t touch the server)</span>';
   setBusy(false);
 }
-$('#live').onclick=startP2P;
-
-// keep the relay WHEP path available as a manual fallback (Stage 5 auto-wires it)
+// Live via the MediaMTX relay (WHEP) — the reliable known-good path. P2P
+// (startP2P) is kept in the code as a follow-up once esp_peer's DTLS-over-TURN
+// is resolved; see docs/esp_peer_dtls_over_turn_issue.md.
 window.startRelayLive=async()=>{ if(!need())return; stopP2P(); liveWant=true; setBusy(true);
-  try{ await connectLive(); }catch(e){ st('⚠ relay failed: '+e.message); scheduleReconnect(); } finally{ setBusy(false); } };
+  st('<span class="spin"></span> Connecting live…');
+  try{ await connectLive();
+    $('#links').innerHTML='<span style="color:var(--mut)">(auto-reconnects if the stream drops · use the video’s volume to unmute)</span>';
+  }catch(e){ st('⚠ live failed: '+e.message+' — retrying…'); scheduleReconnect(); } finally{ setBusy(false); } };
+$('#live').onclick=window.startRelayLive;
 
 if(!cfg.api) st('⚙ Set your API URL + token (same as the gallery) to begin.');
 </script>
